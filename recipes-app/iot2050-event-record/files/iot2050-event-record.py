@@ -16,6 +16,7 @@ import time
 from datetime import datetime
 from systemd import journal
 from enum import Enum
+from pystemd.dbuslib import DBus, DbusMessage
 import grpc
 from gRPC.EventInterface.iot2050_event_pb2 import (
     WriteRequest,
@@ -156,6 +157,30 @@ class ProximitySensorSysfs():
 
     def __exit__(self, exc_type, exc_val, exc_tb): # type: ignore
         self._fd.close()
+
+
+class ProximitySensorDBus():
+    def __init__(self, critical_value: int):
+        self.critical_value = critical_value
+
+    def is_uncovered(self) -> bool:
+        with DBus() as bus:
+            res: DbusMessage = bus.call_method(
+                b"com.siemens.iot2050.pxmt",
+                b"/com/siemens/iot2050/pxmt",
+                b"com.siemens.iot2050.pxmt",
+                b"Retrieve",
+                [])
+            lux = int(res.body)
+            return lux < self.critical_value
+
+        return False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 
 IIO_IMU_PATH = "/sys/devices/platform/bus@100000/2030000.i2c/i2c-5/5-006a/"
