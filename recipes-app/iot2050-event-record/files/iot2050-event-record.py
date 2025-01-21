@@ -9,6 +9,7 @@
 #
 import os
 import sys
+import typing
 import psutil
 import threading
 import time
@@ -127,33 +128,57 @@ def record_eio_events():
         time.sleep(5)
 
 
+class ProximitySensorSysfs():
+    IIO_PRO_PATH = "/sys/devices/platform/bus@100000/2030000.i2c/i2c-5/5-0044/"
+
+    def __init__(self, critical_value: int):
+        self.critical_value = critical_value
+        self._fd: typing.TextIO = None # type: ignore
+
+    def is_uncovered(self) -> bool:
+        if self._fd is None: # type: ignore
+            sys.stderr.write("ERROR: Proximity sensor file does not exist!")
+            return False
+
+        self._fd.seek(0)
+        lux = int(self._fd.read())
+        return lux < self.critical_value
+
+    def __enter__(self):
+        for (dirpath, _, filenames) in os.walk(self.IIO_PRO_PATH):
+            if "in_proximity0_raw" in filenames:
+                pro_raw = f"{dirpath}/in_proximity0_raw"
+                self._fd = open(pro_raw, 'r', encoding='ascii')
+                return self
+
+        sys.stderr.write("ERROR: Proximity sensor not found!")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb): # type: ignore
+        self._fd.close()
+
 
 IIO_IMU_PATH = "/sys/devices/platform/bus@100000/2030000.i2c/i2c-5/5-006a/"
-IIO_PRO_PATH = "/sys/devices/platform/bus@100000/2030000.i2c/i2c-5/5-0044/"
 def record_sensor_events():
     accel_x_raw = "{}/in_accel_x_raw"
     accel_y_raw = "{}/in_accel_y_raw"
     accel_z_raw = "{}/in_accel_z_raw"
-    pro_raw = "{}/in_proximity0_raw"
     imu_w = os.walk(IIO_IMU_PATH)
-    pro_w = os.walk(IIO_PRO_PATH)
     for (dirpath, dirnames, filenames) in imu_w:
         if "in_accel_x_raw" in filenames:
             accel_x_raw = accel_x_raw.format(dirpath)
             accel_y_raw = accel_y_raw.format(dirpath)
             accel_z_raw = accel_z_raw.format(dirpath)
             break
-    for (dirpath, dirnames, filenames) in pro_w:
-        if "in_proximity0_raw" in filenames:
-            pro_raw = pro_raw.format(dirpath)
-            break
+
+    lux_critical_value = int(os.getenv('LUX_CRITICAL_VALUE', '100'))
+    pxmt_sensor = ProximitySensorSysfs(critical_value=lux_critical_value)
     with open(accel_x_raw, 'r') as x, \
         open(accel_y_raw, 'r') as y, \
         open(accel_z_raw, 'r') as z, \
-        open(pro_raw, 'r') as l:
+        pxmt_sensor as l:
         is_uncovered = False
         accel_critical_value = int(os.getenv('ACCEL_CRITICAL_VALUE'))
-        lux_critical_value = int(os.getenv('LUX_CRITICAL_VALUE'))
         while True:
             # Detect tilt sensor event
             x.seek(0)
@@ -176,15 +201,15 @@ def record_sensor_events():
                 write_event(EVENT_TYPES["tilt"], tilted_event)
 
             # Detect tamper sensor event
-            l.seek(0)
-            lux = int(l.read())
-            if lux < lux_critical_value and not is_uncovered:
-                is_uncovered = True
-                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                uncover_event = EVENT_STRINGS["uncover"].format(now)
-                write_event(EVENT_TYPES["uncover"], uncover_event)
-            elif lux > lux_critical_value and is_uncovered:
-                is_uncovered = False
+            if is_uncovered:
+                is_uncovered = l.is_uncovered()
+            else:
+                is_uncovered = l.is_uncovered()
+                if is_uncovered:
+                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    uncover_event = EVENT_STRINGS["uncover"].format(now)
+                    write_event(EVENT_TYPES["uncover"], uncover_event)
+
 
 def event_record():
     if not is_grpc_servers_ready():
