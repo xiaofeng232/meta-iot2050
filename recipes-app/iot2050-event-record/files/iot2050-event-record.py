@@ -9,7 +9,6 @@
 #
 import os
 import sys
-import typing
 import psutil
 import threading
 import time
@@ -127,36 +126,6 @@ def record_eio_events():
                     continue
             write_event(EVENT_TYPES["eio"], event)
         time.sleep(5)
-
-
-class ProximitySensorSysfs():
-    IIO_PRO_PATH = "/sys/devices/platform/bus@100000/2030000.i2c/i2c-5/5-0044/"
-
-    def __init__(self, critical_value: int):
-        self.critical_value = critical_value
-        self._fd: typing.TextIO = None # type: ignore
-
-    def is_uncovered(self) -> bool:
-        if self._fd is None: # type: ignore
-            sys.stderr.write("ERROR: Proximity sensor file does not exist!")
-            return False
-
-        self._fd.seek(0)
-        lux = int(self._fd.read())
-        return lux < self.critical_value
-
-    def __enter__(self):
-        for (dirpath, _, filenames) in os.walk(self.IIO_PRO_PATH):
-            if "in_proximity0_raw" in filenames:
-                pro_raw = f"{dirpath}/in_proximity0_raw"
-                self._fd = open(pro_raw, 'r', encoding='ascii')
-                return self
-
-        sys.stderr.write("ERROR: Proximity sensor not found!")
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb): # type: ignore
-        self._fd.close()
 
 
 class ProximitySensorDBus():
