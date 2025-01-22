@@ -197,7 +197,7 @@ def record_sensor_events():
             break
 
     lux_critical_value = int(os.getenv('LUX_CRITICAL_VALUE', '100'))
-    pxmt_sensor = ProximitySensorSysfs(critical_value=lux_critical_value)
+    pxmt_sensor = ProximitySensorDBus(critical_value=lux_critical_value)
     with open(accel_x_raw, 'r') as x, \
         open(accel_y_raw, 'r') as y, \
         open(accel_z_raw, 'r') as z, \
